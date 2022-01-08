@@ -60,8 +60,8 @@ int main(void)
                         //parent
                         int status;
                         waitpid(pid, &status, 0); //wait for child process to finish exec
-                        printf("Return status value for '%s': %d\n",
-                                cmd, WEXITSTATUS(status));
+                        fprintf(stderr, "+ completed '%s' [%d]\n",
+                                cmd, WEXITSTATUS(status)); //print exit status to stderr
                 }
                 else {
                         perror("forking error");
