@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #define CMDLINE_MAX 512
 
@@ -10,8 +11,9 @@ struct myCmdObj {
     char cmdName[32];      // cmd name i.e. ls
     char *cmdOptions[16];  // cmd options i.e.  ls -l
     int cmdOptionsCount;
+    int redirectionType; //0 = no redir; 1 = std out; 2 = std out & err
     char redirectionFileName[32];  // redirection file name.
-    int status;               
+    //int status;        //seems like we don't need this for now               
 };
 
 // maximum of 16 commands.
@@ -30,20 +32,69 @@ void ResetCommandObj()
                 }
 
                 commandsObj[i].cmdOptionsCount = 0;
-                commandsObj[i].cmdName[0] = '\0';      
+                //commandsObj[i].cmdName[0] = '\0';
+                memset(commandsObj[i].cmdName, '\0', 32);    
+
+                commandsObj[i].redirectionType = 0;
+                memset(commandsObj[i].redirectionFileName, '\0', 32);
         }
 }
+
+/* Phase 4/6 redirection, parsing for redirection and type (> or >&)
+returns the part of the command before the > or >& 
+for regular command line parsing afterward
+*/
+char* FindRedirection(char *cmd)
+{
+        char *redirfile;        //file to redirect to
+        char *newcmd = malloc(CMDLINE_MAX * sizeof(char)); //cmd without file part
+        int redirtype = 0; //0 if no redirect, 1 if stdout, 2 if stderr
+
+        char *isRedirect = strstr(cmd, ">");    //extracts part begining with >
+        int toredirect = strcspn(cmd, ">");     //finds location of >
+
+        //if > is found (not null)
+        if (isRedirect) 
+        {
+                //if it is >&
+                if (isRedirect[1] == '&') 
+                {
+                        redirtype = 2; //redirect std out and err
+                        redirfile = strtok(isRedirect, " >&"); //extact filename
+                }
+                //if it is only >
+                else
+                {
+                        redirtype = 1; //redirect std out only
+                        redirfile = strtok(isRedirect, " >"); //extract filename
+                }
+
+
+                //will have to accomodate piping later; 
+                //redirect would be in last command and not commandsObj[0]
+                strcpy(commandsObj[0].redirectionFileName,redirfile);
+                commandsObj[0].redirectionType = redirtype;
+                
+                //new cmd is same as original cmd without the redirection and file
+                strncpy(newcmd, cmd, toredirect);  //copy chars up to the > 
+        }
+        else strcpy(newcmd, cmd); //cmd is unmodified
+
+        return newcmd;
+}
+
+
 
 // Phase 2, parsing and tokenizing the command line and the options.
 void ParseCommandLine(char *cmd) 
 {
-        int isFirstToken = 1, isRedirection = 0;
+        int isFirstToken = 1;
         int cmdCounter = 0, cmdOptionCounter = 0;
         char *token = strtok (cmd," ");
 
         while (token != NULL)
         {
-                printf ("PRINTING current token: %s\n",token);
+                //printf ("PRINTING current token: %s\n",token);
                 if(isFirstToken){
                         // first token is the command name.
                         strcpy(commandsObj[cmdCounter].cmdName,token);
@@ -52,20 +103,9 @@ void ParseCommandLine(char *cmd)
                         isFirstToken = 0;
                         cmdOptionCounter++;
                 } else {
-                        // not first token, then command option.
-                        if (!strcmp(token, ">")) {
-                                isRedirection = 1;
-                                printf("  Got Redirection\n");
-                        } else if(isRedirection) {
-                                //save redirection filename.
-                                strcpy(commandsObj[cmdCounter].redirectionFileName,token);
-                                isRedirection = 0;
-                        }
-                        else {
-                                commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(32 * sizeof(char));
-                                strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
-                                cmdOptionCounter++;
-                        }
+                        commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(32 * sizeof(char));
+                        strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
+                        cmdOptionCounter++;
                 }
 
                 if (!strcmp(token, "|")) {
@@ -84,9 +124,14 @@ void ParseCommandLine(char *cmd)
 void CmdInShellCd(char* cmd)
 {
         char *cdToken = strtok(cmd," ");
-        char *dirNameToken = strtok (NULL, " ");
+        /*Note to Aliya:
+        changed both char* to cdToken because cdToken would remain unused
+        and cause an error when sshell is compiled with the -Werror flag 
+        (feel free to delete comment once you've read)
+        */
+        cdToken = strtok (NULL, " ");  
 
-        int returnValue = chdir(dirNameToken);
+        int returnValue = chdir(cdToken);
         fprintf(stderr, "+ completed '%s' [%d]\n", cmd, returnValue);
 }
 
@@ -96,7 +141,6 @@ int main(void)
 
         while (1) {
                 char *nl;
-                int retval;
 
                 /* Print prompt */
                 printf("sshell$ ");
@@ -129,18 +173,36 @@ int main(void)
                         CmdInShellCd(cmd);
                         continue;
                 }
+       
+                char* newcmd = FindRedirection(cmd);
 
-                ParseCommandLine(cmd);
+                ParseCommandLine(newcmd);
 
                 pid_t pid; //declare pid
-                //no real args for now (replace second NULL in phase 2):
+
                 if(commandsObj[0].cmdName[0] == '\0'){
                         continue;
                 }
                 pid = fork(); //fork off new process
+                //child
                 if (pid == 0) {
-                        //child
-                        //execvp(cmd, args);
+                        int redirection = commandsObj[0].redirectionType;
+                        //printf("redirection status: %d\n", redirection);
+                        if (redirection != 0)
+                        {
+                                //open file to redirect to
+                                int fd = open(commandsObj[0].redirectionFileName
+                                        , O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                                
+                                dup2(fd, STDOUT_FILENO); //redirect std out 
+                                
+                                if (redirection == 2)
+                                {
+                                        dup2(fd, STDERR_FILENO); //redirect std err
+                                }
+                                close(fd);
+
+                        }
                         execvp(commandsObj[0].cmdName, commandsObj[0].cmdOptions); //use execvp (the -p specifies to use $PATH)
                         perror("error in execv"); //if the exec doesn't work
                         exit(1);
@@ -159,6 +221,7 @@ int main(void)
 
                 // Reset command object struct.
                 ResetCommandObj();
+                free(newcmd);
 
         }
 
