@@ -1,0 +1,8 @@
+Makefile
+REPORT.md
+a.out
+sshell
+sshell.c
+sshell.o
+sshell_ref
+zzout.txt
