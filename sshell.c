@@ -3,6 +3,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 
 #define CMDLINE_MAX 512
 
@@ -23,7 +26,7 @@ struct myCmdObj commandsObj[16] = {0};
 void ResetCommandObj()
 {
         for(int i=0; i<16; ++i) {
-                for(int j=0; j<=commandsObj[i].cmdOptionsCount; ++j) 
+                for(int j=0; j<commandsObj[i].cmdOptionsCount; ++j) 
                 {
                         if(commandsObj[i].cmdOptions[j] != NULL){
                                 free(commandsObj[i].cmdOptions[j]);
@@ -98,15 +101,13 @@ void ParseCommandLine(char *cmd)
                 if(isFirstToken){
                         // first token is the command name.
                         strcpy(commandsObj[cmdCounter].cmdName,token);
-                        commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(32 * sizeof(char));
-                        strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
                         isFirstToken = 0;
-                        cmdOptionCounter++;
-                } else {
-                        commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(32 * sizeof(char));
-                        strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
-                        cmdOptionCounter++;
-                }
+                } 
+
+                commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(32 * sizeof(char));
+                strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
+                cmdOptionCounter++;
+                
 
                 if (!strcmp(token, "|")) {
                         cmdCounter++;
@@ -132,7 +133,39 @@ void CmdInShellCd(char* cmd)
         cdToken = strtok (NULL, " ");  
 
         int returnValue = chdir(cdToken);
-        fprintf(stderr, "+ completed '%s' [%d]\n", cmd, returnValue);
+        if (returnValue == -1)
+                fprintf(stderr, "Error: cannot cd into directory\n");
+        fprintf(stderr, "+ completed '%s' [%d]\n", cmd, (returnValue == -1) ? 1 : 0);
+}
+
+//Phase 6, built-in sls
+void CmdSls(void)
+{
+        DIR *currentDir;                 
+        struct dirent *cwdEntry;        //for a dir entry
+        currentDir = opendir(".");      //open cwd
+
+        if (currentDir == NULL)
+        {
+                fprintf(stderr, "Error: cannot open directory\n");
+                fprintf(stderr, "+ completed 'sls' [1]\n");
+                exit(1);
+        }
+
+        struct stat sb;       //for file info
+        
+        //cycle through cwd entries
+        while ((cwdEntry = readdir(currentDir)) != NULL)
+        {
+                //ignore current + parent directories
+                if ((cwdEntry->d_name)[0] == '.')
+                        continue;
+                
+                stat(cwdEntry->d_name, &sb);  //get file info
+                printf("%s (%lld bytes)\n", cwdEntry->d_name, sb.st_size); //print file info
+        }
+        closedir(currentDir);
+        fprintf(stderr, "+ completed 'sls' [0]\n");
 }
 
 int main(void)
@@ -172,6 +205,9 @@ int main(void)
                 } else if (cmd[0] == 'c' && cmd[1] == 'd' && cmd[2] == ' ' ) {
                         CmdInShellCd(cmd);
                         continue;
+                } else if (cmd[0] == 's' && cmd[1] == 'l' && cmd[2] == 's') {
+                        CmdSls();
+                        continue;
                 }
        
                 char* newcmd = FindRedirection(cmd);
@@ -179,6 +215,11 @@ int main(void)
                 ParseCommandLine(newcmd);
 
                 pid_t pid; //declare pid
+
+                if (commandsObj[0].cmdOptionsCount > 16){
+                        fprintf(stderr, "Error: too many process arguments");
+                        continue;
+                }
 
                 if(commandsObj[0].cmdName[0] == '\0'){
                         continue;
