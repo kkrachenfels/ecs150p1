@@ -16,6 +16,7 @@ struct myCmdObj {
     int cmdOptionsCount;
     int redirectionType; //0 = no redir; 1 = std out; 2 = std out & err
     char redirectionFileName[32];  // redirection file name.
+    int isPipeCmd; //if pipe cmd
     //int status;        //seems like we don't need this for now               
 };
 
@@ -92,6 +93,7 @@ char* FindRedirection(char *cmd)
 void ParseCommandLine(char *cmd) 
 {
         int isFirstToken = 1;
+        int isPipeCmd = 0; //checks if command is pipe
         int cmdCounter = 0, cmdOptionCounter = 0;
         char *token = strtok (cmd," ");
 
@@ -103,33 +105,35 @@ void ParseCommandLine(char *cmd)
                         strcpy(commandsObj[cmdCounter].cmdName,token);
                         isFirstToken = 0;
                 } 
-
-                commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(32 * sizeof(char));
-                strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
-                cmdOptionCounter++;
                 
 
                 if (!strcmp(token, "|")) {
+                        commandsObj[cmdCounter].cmdOptionsCount = cmdOptionCounter;
+                        commandsObj[cmdCounter].isPipeCmd = 1;
                         cmdCounter++;
-                        printf("  Got Pipe: TODO.\n");
-                        break;      
-                } 
+                        cmdOptionCounter = 0;
+                        isFirstToken = 1;
+                        isPipeCmd = 1;   
+                }
+                else {
+                        commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(32 * sizeof(char));
+                        strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
+                        cmdOptionCounter++;
+                }
 
                 token = strtok(NULL, " ");
         }
         // save the number of options for this command
         commandsObj[cmdCounter].cmdOptionsCount = cmdOptionCounter;
+        if (isPipeCmd) {
+                commandsObj[cmdCounter].isPipeCmd = 1;
+        }
 }
 
 // Phase 3, Implement Built-in commands cd in a shell. 
 void CmdInShellCd(char* cmd)
 {
         char *cdToken = strtok(cmd," ");
-        /*Note to Aliya:
-        changed both char* to cdToken because cdToken would remain unused
-        and cause an error when sshell is compiled with the -Werror flag 
-        (feel free to delete comment once you've read)
-        */
         cdToken = strtok (NULL, " ");  
 
         int returnValue = chdir(cdToken);
@@ -215,6 +219,7 @@ int main(void)
                 ParseCommandLine(newcmd);
 
                 pid_t pid; //declare pid
+                int fd[2];
 
                 if (commandsObj[0].cmdOptionsCount > 16){
                         fprintf(stderr, "Error: too many process arguments");
@@ -224,9 +229,23 @@ int main(void)
                 if(commandsObj[0].cmdName[0] == '\0'){
                         continue;
                 }
+                // if it is a pipe command
+                if(commandsObj[0].isPipeCmd == 1) {
+                        pipe (fd);
+                }
+                
                 pid = fork(); //fork off new process
                 //child
                 if (pid == 0) {
+                        if (commandsObj[0].isPipeCmd == 1) {
+                                //TO DO : handle more than one pipe
+                                // while i < command count ...
+                                close(fd[1]);
+                                dup2(fd[0], STDIN_FILENO);
+                                close(fd[0]);
+                                execvp(commandsObj[1].cmdName, commandsObj[1].cmdOptions);
+                        }
+                        else {
                         int redirection = commandsObj[0].redirectionType;
                         //printf("redirection status: %d\n", redirection);
                         if (redirection != 0)
@@ -244,16 +263,28 @@ int main(void)
                                 close(fd);
 
                         }
+        
                         execvp(commandsObj[0].cmdName, commandsObj[0].cmdOptions); //use execvp (the -p specifies to use $PATH)
                         perror("error in execv"); //if the exec doesn't work
                         exit(1);
+                        }
                 } 
                 else if (pid > 0) {
                         //parent
+                        // if pipe cmd left side
+                        if (commandsObj[0].isPipeCmd == 1) {
+                                close(fd[0]);
+                                dup2(fd[1], STDOUT_FILENO);
+                                close(fd[1]);
+                                execvp(commandsObj[0].cmdName, commandsObj[0].cmdOptions);
+                        }
+                        else  
+                        {
                         int status;
                         waitpid(pid, &status, 0); //wait for child process to finish exec
                         fprintf(stderr, "+ completed '%s' [%d]\n",
                                 cmd, WEXITSTATUS(status)); //print exit status to stderr
+                        }
                 }
                 else {
                         perror("forking error");
