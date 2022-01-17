@@ -8,25 +8,29 @@
 #include <sys/wait.h>
 
 #define CMDLINE_MAX 512
+#define MAX_ARGS 16
+#define MAX_CMDS 4
+#define MAX_CMDLENGTH 32
 
 // struct to represent a command.
 struct myCmdObj {
-    char cmdName[32];      // cmd name i.e. ls
-    char *cmdOptions[16];  // cmd options i.e.  ls -l
+    char cmdName[MAX_CMDLENGTH];      // cmd name i.e. ls
+    char *cmdOptions[MAX_ARGS+1];  // cmd options i.e.  ls -l
     int cmdOptionsCount;
     int redirectionType; //0 = no redir; 1 = std out; 2 = std out & err
-    char redirectionFileName[32];  // redirection file name.
+    char redirectionFileName[MAX_CMDLENGTH];  // redirection file name.
     int isPipeCmd; //if pipe cmd
     //int status;        //seems like we don't need this for now               
 };
 
-// maximum of 16 commands.
-struct myCmdObj commandsObj[16] = {0};
+// maximum of 4 commands.
+struct myCmdObj commandsObj[MAX_CMDS] = {0};
+
 
 // Reset and free memory for commandObj struct.
 void ResetCommandObj()
 {
-        for(int i=0; i<16; ++i) {
+        for(int i=0; i<MAX_CMDS; ++i) {
                 for(int j=0; j<commandsObj[i].cmdOptionsCount; ++j) 
                 {
                         if(commandsObj[i].cmdOptions[j] != NULL){
@@ -34,13 +38,14 @@ void ResetCommandObj()
                         }
                         commandsObj[i].cmdOptions[j] = NULL;
                 }
+                //terminate cmdOptions with NULL ptr for execvp()
+                commandsObj[i].cmdOptions[MAX_ARGS] = NULL;
 
                 commandsObj[i].cmdOptionsCount = 0;
-                //commandsObj[i].cmdName[0] = '\0';
-                memset(commandsObj[i].cmdName, '\0', 32);    
+                memset(commandsObj[i].cmdName, '\0', MAX_CMDLENGTH);    
 
                 commandsObj[i].redirectionType = 0;
-                memset(commandsObj[i].redirectionFileName, '\0', 32);
+                memset(commandsObj[i].redirectionFileName, '\0', MAX_CMDLENGTH);
         }
 }
 
@@ -90,14 +95,14 @@ char* FindRedirection(char *cmd)
 
 
 // Phase 2, parsing and tokenizing the command line and the options.
-void ParseCommandLine(char *cmd) 
+int ParseCommandLine(char *cmd) 
 {
         int isFirstToken = 1;
         int isPipeCmd = 0; //checks if command is pipe
         int cmdCounter = 0, cmdOptionCounter = 0;
         char *token = strtok (cmd," ");
 
-        while (token != NULL)
+        while (token != NULL && cmdOptionCounter <= MAX_ARGS)
         {
                 //printf ("PRINTING current token: %s\n",token);
                 if(isFirstToken){
@@ -123,11 +128,19 @@ void ParseCommandLine(char *cmd)
 
                 token = strtok(NULL, " ");
         }
+        //pass error code back
+        if (cmdOptionCounter > MAX_ARGS)
+        {
+                commandsObj[cmdCounter].cmdOptionsCount = MAX_ARGS;
+                return 1;       //error
+        }
+
         // save the number of options for this command
         commandsObj[cmdCounter].cmdOptionsCount = cmdOptionCounter;
         if (isPipeCmd) {
                 commandsObj[cmdCounter].isPipeCmd = 1;
         }
+        return 0;
 }
 
 // Phase 3, Implement Built-in commands cd in a shell. 
@@ -139,7 +152,7 @@ void CmdInShellCd(char* cmd)
         int returnValue = chdir(cdToken);
         if (returnValue == -1)
                 fprintf(stderr, "Error: cannot cd into directory\n");
-        fprintf(stderr, "+ completed '%s' [%d]\n", cmd, (returnValue == -1) ? 1 : 0);
+        fprintf(stderr, "+ completed '%s %s' [%d]\n", cmd, cdToken, (returnValue == -1) ? 1 : 0);
 }
 
 //Phase 6, built-in sls
@@ -200,6 +213,7 @@ int main(void)
                 /* Builtin command */
                 if (!strcmp(cmd, "exit")) {
                         fprintf(stderr, "Bye...\n");
+                        fprintf(stderr, "+ completed '%s' [%d]\n", cmd, 0);
                         break;
                 } else if (!strcmp(cmd, "pwd")) {
                         char *cwd = getcwd(NULL,0);
@@ -216,13 +230,15 @@ int main(void)
        
                 char* newcmd = FindRedirection(cmd);
 
-                ParseCommandLine(newcmd);
+                int too_many_args = ParseCommandLine(newcmd);
 
                 pid_t pid; //declare pid
                 int fd[2];
 
-                if (commandsObj[0].cmdOptionsCount > 16){
-                        fprintf(stderr, "Error: too many process arguments");
+                if (too_many_args){
+                        fprintf(stderr, "Error: too many process arguments\n");
+                        ResetCommandObj();
+                        free(newcmd);
                         continue;
                 }
 
@@ -278,12 +294,11 @@ int main(void)
                                 close(fd[1]);
                                 execvp(commandsObj[0].cmdName, commandsObj[0].cmdOptions);
                         }
-                        else  
-                        {
-                        int status;
-                        waitpid(pid, &status, 0); //wait for child process to finish exec
-                        fprintf(stderr, "+ completed '%s' [%d]\n",
-                                cmd, WEXITSTATUS(status)); //print exit status to stderr
+                        else {
+                                int status;
+                                waitpid(pid, &status, 0); //wait for child process to finish exec
+                                fprintf(stderr, "+ completed '%s' [%d]\n",
+                                        cmd, WEXITSTATUS(status)); //print exit status to stderr
                         }
                 }
                 else {
