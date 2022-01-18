@@ -49,14 +49,13 @@ void ResetCommandObj()
         }
 }
 
-/* Phase 4/6 redirection, parsing for redirection and type (> or >&)
-returns the part of the command before the > or >& 
-for regular command line parsing afterward
-*/
-char* FindRedirection(char *cmd)
+
+
+//Parsing for redirection, removes redirection file name from command */
+char* FindRedirection(char *cmd, int cmdCount, int cmdSize)
 {
         char *redirfile;        //file to redirect to
-        char *newcmd = malloc(CMDLINE_MAX * sizeof(char)); //cmd without file part
+        char *newcmd = malloc(cmdSize * sizeof(char)); //cmd without file part
         int redirtype = 0; //0 if no redirect, 1 if stdout, 2 if stderr
 
         char *isRedirect = strstr(cmd, ">");    //extracts part begining with >
@@ -78,11 +77,8 @@ char* FindRedirection(char *cmd)
                         redirfile = strtok(isRedirect, " >"); //extract filename
                 }
 
-
-                //will have to accomodate piping later; 
-                //redirect would be in last command and not commandsObj[0]
-                strcpy(commandsObj[0].redirectionFileName,redirfile);
-                commandsObj[0].redirectionType = redirtype;
+                strcpy(commandsObj[cmdCount].redirectionFileName,redirfile);
+                commandsObj[cmdCount].redirectionType = redirtype;
                 
                 //new cmd is same as original cmd without the redirection and file
                 strncpy(newcmd, cmd, toredirect);  //copy chars up to the > 
@@ -94,12 +90,11 @@ char* FindRedirection(char *cmd)
 
 
 
-// Phase 2, parsing and tokenizing the command line and the options.
-int ParseCommandLine(char *cmd) 
+//Parsing and tokenizing a command and its options
+void ParseCommand(char *cmd, int cmdCounter) 
 {
         int isFirstToken = 1;
-        int isPipeCmd = 0; //checks if command is pipe
-        int cmdCounter = 0, cmdOptionCounter = 0;
+        int cmdOptionCounter = 0;
         char *token = strtok (cmd," ");
 
         while (token != NULL && cmdOptionCounter <= MAX_ARGS)
@@ -111,37 +106,58 @@ int ParseCommandLine(char *cmd)
                         isFirstToken = 0;
                 } 
                 
-
-                if (!strcmp(token, "|")) {
-                        commandsObj[cmdCounter].cmdOptionsCount = cmdOptionCounter;
-                        commandsObj[cmdCounter].isPipeCmd = 1;
-                        cmdCounter++;
-                        cmdOptionCounter = 0;
-                        isFirstToken = 1;
-                        isPipeCmd = 1;   
-                }
-                else {
-                        commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(32 * sizeof(char));
-                        strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
-                        cmdOptionCounter++;
-                }
+                commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(MAX_CMDLENGTH * sizeof(char));
+                strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
+                cmdOptionCounter++;
 
                 token = strtok(NULL, " ");
         }
-        //pass error code back
+        //will check this for error code later
         if (cmdOptionCounter > MAX_ARGS)
-        {
-                commandsObj[cmdCounter].cmdOptionsCount = MAX_ARGS;
-                return 1;       //error
-        }
+                commandsObj[cmdCounter].cmdOptionsCount = MAX_ARGS+1;
 
         // save the number of options for this command
         commandsObj[cmdCounter].cmdOptionsCount = cmdOptionCounter;
-        if (isPipeCmd) {
-                commandsObj[cmdCounter].isPipeCmd = 1;
-        }
-        return 0;
 }
+
+
+//Splits command line into multiple commands, separated by pipes
+int FindPipes(char *cmd, char **pipeCmds)
+{
+        int cmdCounter = 0;
+
+        char *pipeToken = strtok (cmd,"|");
+
+        while (pipeToken != NULL)
+        {
+                pipeCmds[cmdCounter] = (char *) malloc(strlen(pipeToken) * sizeof(char));
+                strcpy(pipeCmds[cmdCounter], pipeToken);
+                //printf("Current pipe token: %s\n", pipeCmds[cmdCounter]);
+                cmdCounter++;
+                pipeToken = strtok(NULL, "|");
+        }
+        return cmdCounter;
+}
+
+
+//Parses through the entire command line
+int ParseCmdLine(char *cmd)
+{
+        char *splitCmds[MAX_CMDS];
+
+        int numCmds = FindPipes(cmd, splitCmds);
+
+        char *tempCmdHolder;
+
+        for (int i = 0; i < numCmds; i++)
+        {
+                tempCmdHolder = FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
+                ParseCommand(tempCmdHolder, i);
+                free(tempCmdHolder);
+        }
+        return numCmds;
+}
+
 
 // Phase 3, Implement Built-in commands cd in a shell. 
 void CmdInShellCd(char* cmd)
@@ -174,7 +190,7 @@ void CmdSls(void)
         //cycle through cwd entries
         while ((cwdEntry = readdir(currentDir)) != NULL)
         {
-                //ignore current + parent directories
+                //ignore hidden directories
                 if ((cwdEntry->d_name)[0] == '.')
                         continue;
                 
@@ -227,18 +243,27 @@ int main(void)
                         CmdSls();
                         continue;
                 }
-       
-                char* newcmd = FindRedirection(cmd);
 
-                int too_many_args = ParseCommandLine(newcmd);
+                //so original cmd line remains unmodified for status printing
+                char cmdForParsing[CMDLINE_MAX];
+                strcpy(cmdForParsing, cmd);
+
+                int numOfCmds = ParseCmdLine(cmdForParsing);
 
                 pid_t pid; //declare pid
                 int fd[2];
 
-                if (too_many_args){
+                int maxargs = 0;
+                for (int i = 0; i < numOfCmds; i++)
+                {
+                        if (commandsObj[i].cmdOptionsCount > MAX_ARGS)
+                               maxargs = 1;
+                }
+
+                if (maxargs){
                         fprintf(stderr, "Error: too many process arguments\n");
                         ResetCommandObj();
-                        free(newcmd);
+                        //free(newcmd);
                         continue;
                 }
 
@@ -246,24 +271,16 @@ int main(void)
                         continue;
                 }
                 // if it is a pipe command
-                if(commandsObj[0].isPipeCmd == 1) {
+                /*if(commandsObj[0].isPipeCmd == 1) {
                         pipe (fd);
-                }
+                }*/
                 
                 pid = fork(); //fork off new process
                 //child
                 if (pid == 0) {
-                        if (commandsObj[0].isPipeCmd == 1) {
-                                //TO DO : handle more than one pipe
-                                // while i < command count ...
-                                close(fd[1]);
-                                dup2(fd[0], STDIN_FILENO);
-                                close(fd[0]);
-                                execvp(commandsObj[1].cmdName, commandsObj[1].cmdOptions);
-                        }
-                        else {
                         int redirection = commandsObj[0].redirectionType;
                         //printf("redirection status: %d\n", redirection);
+ 
                         if (redirection != 0)
                         {
                                 //open file to redirect to
@@ -283,23 +300,16 @@ int main(void)
                         execvp(commandsObj[0].cmdName, commandsObj[0].cmdOptions); //use execvp (the -p specifies to use $PATH)
                         perror("error in execv"); //if the exec doesn't work
                         exit(1);
-                        }
+                        
                 } 
                 else if (pid > 0) {
                         //parent
                         // if pipe cmd left side
-                        if (commandsObj[0].isPipeCmd == 1) {
-                                close(fd[0]);
-                                dup2(fd[1], STDOUT_FILENO);
-                                close(fd[1]);
-                                execvp(commandsObj[0].cmdName, commandsObj[0].cmdOptions);
-                        }
-                        else {
-                                int status;
-                                waitpid(pid, &status, 0); //wait for child process to finish exec
-                                fprintf(stderr, "+ completed '%s' [%d]\n",
-                                        cmd, WEXITSTATUS(status)); //print exit status to stderr
-                        }
+                        int status;
+                        waitpid(pid, &status, 0); //wait for child process to finish exec
+                        fprintf(stderr, "+ completed '%s' [%d]\n",
+                                cmd, WEXITSTATUS(status)); //print exit status to stderr
+                        
                 }
                 else {
                         perror("forking error");
@@ -308,7 +318,7 @@ int main(void)
 
                 // Reset command object struct.
                 ResetCommandObj();
-                free(newcmd);
+                //free(newcmd);
 
         }
 
