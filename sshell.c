@@ -52,9 +52,9 @@ void ResetCommandObj()
 
 
 //Parsing for redirection, removes redirection file name from command */
-void FindRedirection(char *cmd, int cmdCount, int cmdSize)
+int FindRedirection(char *cmd, int cmdCount, int cmdSize)
 {
-        char *redirfile;        //file to redirect to
+        char *redirfile = NULL;        //file to redirect to
         int redirtype = 0; //0 if no redirect, 1 if stdout, 2 if stderr
 
         char *isRedirect = strstr(cmd, ">");    //extracts part begining with >
@@ -63,6 +63,7 @@ void FindRedirection(char *cmd, int cmdCount, int cmdSize)
         //if > is found (not null)
         if (isRedirect) 
         {
+
                 //if it is >&
                 if (isRedirect[1] == '&') 
                 {
@@ -74,6 +75,13 @@ void FindRedirection(char *cmd, int cmdCount, int cmdSize)
                 {
                         redirtype = 1; //redirect std out only
                         redirfile = strtok(isRedirect, " >"); //extract filename
+                }
+                if (redirfile == NULL)
+                {
+                        fprintf(stderr, "Error: no output file\n");
+                        ResetCommandObj();
+                        return 1;
+                        //free(newcmd);
                 }
 
                 strcpy(commandsObj[cmdCount].redirectionFileName,redirfile);
@@ -91,8 +99,48 @@ void FindRedirection(char *cmd, int cmdCount, int cmdSize)
         //else strcpy(newcmd, cmd); //cmd is unmodified
 
         //return newcmd;
+        return 0;
 }
 
+int FindPipeError(char *cmd, int cmdSize)
+{
+        char *pipeRightSide = NULL;
+        char *hasRedirecetion = strstr(cmd, ">");
+
+        if (hasRedirecetion)
+        {
+                if (strstr(cmd, "|"))
+                {
+                        fprintf(stderr, "Error: mislocated output redirection\n");
+                        return 1;
+                }
+        }
+
+        char *isPipe = strstr(cmd, "|");
+        int toPipe = strcspn(cmd, "|");     //finds location of |
+        //if | is found (not null)
+        printf("command is: %s\n", cmd);
+        if (isPipe) 
+        {
+                //if it is only |
+                if (toPipe == 0)
+                {
+                        fprintf(stderr, "Error: missing command\n");
+                        ResetCommandObj();
+                        return 1;
+                }
+
+                printf("isPipe found & coming here\n");
+                pipeRightSide = strtok(isPipe, " |"); //extract right side command
+                if (pipeRightSide == NULL)
+                {
+                        fprintf(stderr, "Error: missing command\n");
+                        ResetCommandObj();
+                        return 1;
+                }
+        }
+        return 0;
+}
 
 
 //Parsing and tokenizing a command and its options
@@ -150,11 +198,19 @@ int ParseCmdLine(char *cmd)
 {
         char *splitCmds[MAX_CMDS];
 
+        int okPipe = FindPipeError(cmd, strlen(cmd));
         int numCmds = FindPipes(cmd, splitCmds);
-
+        if (okPipe == 1)
+                {
+                        return 0;
+                }
         for (int i = 0; i < numCmds; i++)
         {
-                FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
+                int okRedirection = FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
+                if (okRedirection == 1)
+                {
+                        return 0;
+                }
                 ParseCommand(splitCmds[i], i);
         }
         //for debugging, to make sure everything was parsed correctly
