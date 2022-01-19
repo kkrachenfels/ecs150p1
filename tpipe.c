@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#define CMD_MAX 2
+#define CMD_MAX 4
 
 
 //test pipeline

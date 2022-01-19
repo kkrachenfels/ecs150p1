@@ -55,7 +55,6 @@ void ResetCommandObj()
 void FindRedirection(char *cmd, int cmdCount, int cmdSize)
 {
         char *redirfile;        //file to redirect to
-        //char *newcmd = malloc(cmdSize * sizeof(char)); //cmd without file part
         int redirtype = 0; //0 if no redirect, 1 if stdout, 2 if stderr
 
         char *isRedirect = strstr(cmd, ">");    //extracts part begining with >
@@ -158,6 +157,19 @@ int ParseCmdLine(char *cmd)
                 FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
                 ParseCommand(splitCmds[i], i);
         }
+        //for debugging, to make sure everything was parsed correctly
+        /*for (int i = 0; i < numCmds; i++)
+        {
+                printf("Command [%d]: %s", i, commandsObj[i].cmdName);
+                for (int j = 1; j < commandsObj[i].cmdOptionsCount; j++)
+                {
+                        printf(" %s", commandsObj[i].cmdOptions[j]);
+                }
+                printf("\n Redirection type: %d and filename: %s\n",
+                        commandsObj[i].redirectionType, 
+                        commandsObj[i].redirectionFileName);
+        }*/
+
         return numCmds;
 }
 
@@ -204,6 +216,55 @@ void CmdSls(void)
         fprintf(stderr, "+ completed 'sls' [0]\n");
 }
 
+
+void redirectStream(int redirType, int cmdNum)
+{
+        if (redirType != 0)
+        {
+                //open file to redirect to
+                int fd = open(commandsObj[cmdNum].redirectionFileName
+                        , O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                                        
+                dup2(fd, STDOUT_FILENO); //redirect std out 
+                                        
+                if (redirType == 2)
+                        dup2(fd, STDERR_FILENO); //redirect std err
+                
+                close(fd);
+        }  
+}
+
+void setupPipes(int cmdNum, int totalCmds, int fds[][2])
+{
+        /*printf("Child here. Pid = %d, parent = %d. i = %d\n", 
+        getpid(), getppid(), cmdNum);   //debugging*/
+                        
+        //child needs to write stdout to a pipe 
+        if (cmdNum < totalCmds - 1)
+        {
+                close(fds[cmdNum][0]); //don't need read access to pipe
+                dup2(fds[cmdNum][1], STDOUT_FILENO); //replace stdout with pipe
+                //dup2(fds[i][1], STDERR_FILENO);
+                close(fds[cmdNum][1]);       //close now unused fd
+        }
+
+        //child needs to read stdin from a pipe
+        if (cmdNum > 0)
+        {
+                close(fds[cmdNum-1][1]);     //don't need write access to pipe
+                dup2(fds[cmdNum-1][0], STDIN_FILENO); //replace stdin with pipe
+                close(fds[cmdNum-1][0]); //close now unused fd
+        }
+
+        /*close all other pipelines since each child has fds to
+        pipelines it doesn't need*/
+        for (int i = 0; i < cmdNum; i++)
+        {
+                close(fds[i][0]);
+                close(fds[i][1]);
+        }
+}
+
 int main(void)
 {
         char cmd[CMDLINE_MAX];
@@ -248,13 +309,12 @@ int main(void)
                 }
 
                 //so original cmd line remains unmodified for status printing
-                char cmdForParsing[CMDLINE_MAX];
+                char cmdForParsing[CMDLINE_MAX] = {0};
                 strcpy(cmdForParsing, cmd);
 
                 int numOfCmds = ParseCmdLine(cmdForParsing);
 
-                pid_t pid; //declare pid
-                int fd[2];
+                //pid_t pid; //declare pid
 
                 int maxargs = 0;
                 for (int i = 0; i < numOfCmds; i++)
@@ -273,55 +333,74 @@ int main(void)
                 if(commandsObj[0].cmdName[0] == '\0'){
                         continue;
                 }
-                // if it is a pipe command
-                /*if(commandsObj[0].isPipeCmd == 1) {
-                        pipe (fd);
-                }*/
                 
-                pid = fork(); //fork off new process
-                //child
-                if (pid == 0) {
-                        int redirection = commandsObj[0].redirectionType;
-                        //printf("redirection status: %d\n", redirection);
- 
-                        if (redirection != 0)
-                        {
-                                //open file to redirect to
-                                int fd = open(commandsObj[0].redirectionFileName
-                                        , O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                                
-                                dup2(fd, STDOUT_FILENO); //redirect std out 
-                                
-                                if (redirection == 2)
-                                {
-                                        dup2(fd, STDERR_FILENO); //redirect std err
-                                }
-                                close(fd);
+                /*STARTING FORKING....*/
+                int fds[numOfCmds-1][2]; //n commands = n-1 pipes
+                pid_t pids[numOfCmds]; //n pids
 
+                //create pipes
+                for (int i = 0; i < numOfCmds; i++)
+                {
+                        pipe(fds[i]);
+                }
+
+                for (int i = 0; i < numOfCmds; i++)
+                {
+                        //for each piped cmd, fork and then save child pid
+                        pids[i] = fork();
+                        
+                        //child
+                        if (pids[i] == 0)
+                        {
+                                setupPipes(i, numOfCmds, fds);
+                                redirectStream(commandsObj[i].redirectionType, i);
+
+                                execvp(commandsObj[i].cmdName, commandsObj[i].cmdOptions); //use execvp (the -p specifies to use $PATH)
+                                
+                                perror("Error in execv"); //if the exec doesn't work
+                                exit(1);
                         }
-        
-                        execvp(commandsObj[0].cmdName, commandsObj[0].cmdOptions); //use execvp (the -p specifies to use $PATH)
-                        perror("error in execv"); //if the exec doesn't work
-                        exit(1);
-                        
-                } 
-                else if (pid > 0) {
                         //parent
-                        // if pipe cmd left side
-                        int status;
-                        waitpid(pid, &status, 0); //wait for child process to finish exec
-                        fprintf(stderr, "+ completed '%s' [%d]\n",
-                                cmd, WEXITSTATUS(status)); //print exit status to stderr
-                        
+                        else if (pids[i] > 0)
+                        {
+                                continue;
+                                //debugging
+                                /*printf("Parent here. Pid: %d. Just forked off child: %d\n",
+                                        getpid(), pids[i]);*/ 
+                        }
+                        else
+                        {
+                                perror("Forking error");
+                                exit(1);    
+                        }
                 }
-                else {
-                        perror("forking error");
-                        exit(1);
+                
+                for (int i = 0; i < numOfCmds-1; i++)
+                {
+                        close(fds[i][0]);
+                        close(fds[i][1]);
                 }
+
+                //wait for each child to finish
+                int status;
+                int statuses[numOfCmds];
+                for (int i = 0; i < numOfCmds; i++)
+                {
+                        waitpid(pids[i], &status, 0);
+                        statuses[i] = WEXITSTATUS(status);
+                }
+
+                //print completetion message
+                fprintf(stderr, "+ completed '%s'", cmd);
+                for (int i = 0; i < numOfCmds; i++)
+                {
+                        fprintf(stderr, " [%d]", statuses[i]);
+                }
+                fprintf(stderr, "\n");
+                
 
                 // Reset command object struct.
                 ResetCommandObj();
-                //free(newcmd);
 
         }
 
