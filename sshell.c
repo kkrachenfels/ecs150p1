@@ -52,10 +52,10 @@ void ResetCommandObj()
 
 
 //Parsing for redirection, removes redirection file name from command */
-char* FindRedirection(char *cmd, int cmdCount, int cmdSize)
+void FindRedirection(char *cmd, int cmdCount, int cmdSize)
 {
         char *redirfile;        //file to redirect to
-        char *newcmd = malloc(cmdSize * sizeof(char)); //cmd without file part
+        //char *newcmd = malloc(cmdSize * sizeof(char)); //cmd without file part
         int redirtype = 0; //0 if no redirect, 1 if stdout, 2 if stderr
 
         char *isRedirect = strstr(cmd, ">");    //extracts part begining with >
@@ -81,11 +81,17 @@ char* FindRedirection(char *cmd, int cmdCount, int cmdSize)
                 commandsObj[cmdCount].redirectionType = redirtype;
                 
                 //new cmd is same as original cmd without the redirection and file
-                strncpy(newcmd, cmd, toredirect);  //copy chars up to the > 
-        }
-        else strcpy(newcmd, cmd); //cmd is unmodified
+                char* tmpCmdHolder = calloc(cmdSize, sizeof(char));
+                strncpy(tmpCmdHolder, cmd, toredirect);
+                memset(cmd, '\0', cmdSize);
+                strcpy(cmd, tmpCmdHolder);
+                free(tmpCmdHolder);
 
-        return newcmd;
+                //strncpy(newcmd, cmd, toredirect);  //copy chars up to the > 
+        }
+        //else strcpy(newcmd, cmd); //cmd is unmodified
+
+        //return newcmd;
 }
 
 
@@ -147,13 +153,10 @@ int ParseCmdLine(char *cmd)
 
         int numCmds = FindPipes(cmd, splitCmds);
 
-        char *tempCmdHolder;
-
         for (int i = 0; i < numCmds; i++)
         {
-                tempCmdHolder = FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
-                ParseCommand(tempCmdHolder, i);
-                free(tempCmdHolder);
+                FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
+                ParseCommand(splitCmds[i], i);
         }
         return numCmds;
 }

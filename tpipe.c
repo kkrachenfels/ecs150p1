@@ -3,16 +3,20 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#define CMD_MAX 4
-
+#define CMD_MAX 2
 
 
 //test pipeline
 //ls | grep "shell" | head -n 6 | grep "sshell"
-char *cmds[CMD_MAX] = {"ls", "grep", "head", "grep"};
+
+
+/*char *cmds[CMD_MAX] = {"ls", "grep", "head", "grep"};
 char *cmdargs[CMD_MAX][CMD_MAX] = {{"ls", NULL, NULL, NULL}, 
 	{"grep", "shell", NULL, NULL}, 
-	{"head", "-n", "6", NULL}, {"grep", "sshell", NULL, NULL}};
+	{"head", "-n", "6", NULL}, {"grep", "sshell", NULL, NULL}};*/
+
+char *cmds[CMD_MAX] = {"ls", "grep"};
+char *cmdargs[CMD_MAX][3] = {{"ls", "nonexistent_file", NULL}, {"grep", "shell", NULL}};
 
 
 
@@ -51,6 +55,7 @@ int main(void)
 			{
 				close(fds[i][0]);	//don't need read access to pipe
 				dup2(fds[i][1], STDOUT_FILENO);	//replace stdout with pipe
+				dup2(fds[i][1], STDERR_FILENO);
 				close(fds[i][1]);	//close now unused fd
 			}
 
@@ -64,7 +69,7 @@ int main(void)
 
 			/*close all other pipelines since each child has fds to
 			pipelines it doesn't need*/
-			for (int j = 0; j <= i; j++)
+			for (int j = 0; j < i; j++)
 			{
 				close(fds[j][0]);
 				close(fds[j][1]);

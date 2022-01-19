@@ -1,4 +1,4 @@
-sshell: sshell.o
+sshell: sshell.o 
 	gcc -Wall -Wextra -Werror -o sshell sshell.o
 
 clean:
