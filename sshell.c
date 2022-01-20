@@ -19,8 +19,7 @@ struct myCmdObj {
     int cmdOptionsCount;
     int redirectionType; //0 = no redir; 1 = std out; 2 = std out & err
     char redirectionFileName[MAX_CMDLENGTH];  // redirection file name.
-    int isPipeCmd; //if pipe cmd
-    //int status;        //seems like we don't need this for now               
+    int pipeStdErr; //if piping std error in addition to std out           
 };
 
 // maximum of 4 commands.
@@ -46,6 +45,8 @@ void ResetCommandObj()
 
                 commandsObj[i].redirectionType = 0;
                 memset(commandsObj[i].redirectionFileName, '\0', MAX_CMDLENGTH);
+
+                commandsObj[i].pipeStdErr = 0;
         }
 }
 
@@ -138,6 +139,11 @@ int FindPipes(char *cmd, char **pipeCmds)
 
         while (pipeToken != NULL)
         {
+                if (pipeToken[0] == '&')
+                {
+                        pipeToken++;
+                        commandsObj[cmdCounter-1].pipeStdErr = 2;
+                }
                 pipeCmds[cmdCounter] = (char *) malloc(strlen(pipeToken) * sizeof(char));
                 strcpy(pipeCmds[cmdCounter], pipeToken);
                 //printf("Current pipe token: %s\n", pipeCmds[cmdCounter]);
@@ -247,7 +253,10 @@ void setupPipes(int cmdNum, int totalCmds, int fds[][2])
         {
                 close(fds[cmdNum][0]); //don't need read access to pipe
                 dup2(fds[cmdNum][1], STDOUT_FILENO); //replace stdout with pipe
-                //dup2(fds[i][1], STDERR_FILENO);
+                if (commandsObj[cmdNum].pipeStdErr == 2)
+                {
+                        dup2(fds[cmdNum][1], STDERR_FILENO); //replace stderr with pipe
+                }
                 close(fds[cmdNum][1]);       //close now unused fd
         }
 
