@@ -52,9 +52,9 @@ void ResetCommandObj()
 
 
 //Parsing for redirection, removes redirection file name from command */
-int FindRedirection(char *cmd, int cmdCount, int cmdSize)
+void FindRedirection(char *cmd, int cmdCount, int cmdSize)
 {
-        char *redirfile = NULL;        //file to redirect to
+        char *redirfile;        //file to redirect to
         int redirtype = 0; //0 if no redirect, 1 if stdout, 2 if stderr
 
         char *isRedirect = strstr(cmd, ">");    //extracts part begining with >
@@ -63,7 +63,6 @@ int FindRedirection(char *cmd, int cmdCount, int cmdSize)
         //if > is found (not null)
         if (isRedirect) 
         {
-
                 //if it is >&
                 if (isRedirect[1] == '&') 
                 {
@@ -76,15 +75,11 @@ int FindRedirection(char *cmd, int cmdCount, int cmdSize)
                         redirtype = 1; //redirect std out only
                         redirfile = strtok(isRedirect, " >"); //extract filename
                 }
-                if (redirfile == NULL)
-                {
-                        fprintf(stderr, "Error: no output file\n");
-                        ResetCommandObj();
-                        return 1;
-                        //free(newcmd);
-                }
 
-                strcpy(commandsObj[cmdCount].redirectionFileName,redirfile);
+                if (redirfile != NULL)
+                {
+                    strcpy(commandsObj[cmdCount].redirectionFileName,redirfile);    
+                }
                 commandsObj[cmdCount].redirectionType = redirtype;
                 
                 //new cmd is same as original cmd without the redirection and file
@@ -99,48 +94,8 @@ int FindRedirection(char *cmd, int cmdCount, int cmdSize)
         //else strcpy(newcmd, cmd); //cmd is unmodified
 
         //return newcmd;
-        return 0;
 }
 
-int FindPipeError(char *cmd, int cmdSize)
-{
-        char *pipeRightSide = NULL;
-        char *hasRedirecetion = strstr(cmd, ">");
-
-        if (hasRedirecetion)
-        {
-                if (strstr(cmd, "|"))
-                {
-                        fprintf(stderr, "Error: mislocated output redirection\n");
-                        return 1;
-                }
-        }
-
-        char *isPipe = strstr(cmd, "|");
-        int toPipe = strcspn(cmd, "|");     //finds location of |
-        //if | is found (not null)
-        printf("command is: %s\n", cmd);
-        if (isPipe) 
-        {
-                //if it is only |
-                if (toPipe == 0)
-                {
-                        fprintf(stderr, "Error: missing command\n");
-                        ResetCommandObj();
-                        return 1;
-                }
-
-                printf("isPipe found & coming here\n");
-                pipeRightSide = strtok(isPipe, " |"); //extract right side command
-                if (pipeRightSide == NULL)
-                {
-                        fprintf(stderr, "Error: missing command\n");
-                        ResetCommandObj();
-                        return 1;
-                }
-        }
-        return 0;
-}
 
 
 //Parsing and tokenizing a command and its options
@@ -198,19 +153,11 @@ int ParseCmdLine(char *cmd)
 {
         char *splitCmds[MAX_CMDS];
 
-        int okPipe = FindPipeError(cmd, strlen(cmd));
         int numCmds = FindPipes(cmd, splitCmds);
-        if (okPipe == 1)
-                {
-                        return 0;
-                }
+
         for (int i = 0; i < numCmds; i++)
         {
-                int okRedirection = FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
-                if (okRedirection == 1)
-                {
-                        return 0;
-                }
+                FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
                 ParseCommand(splitCmds[i], i);
         }
         //for debugging, to make sure everything was parsed correctly
@@ -280,14 +227,14 @@ void redirectStream(int redirType, int cmdNum)
                 //open file to redirect to
                 int fd = open(commandsObj[cmdNum].redirectionFileName
                         , O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                                        
+                 
                 dup2(fd, STDOUT_FILENO); //redirect std out 
                                         
                 if (redirType == 2)
                         dup2(fd, STDERR_FILENO); //redirect std err
                 
                 close(fd);
-        }  
+        }
 }
 
 void setupPipes(int cmdNum, int totalCmds, int fds[][2])
@@ -320,6 +267,82 @@ void setupPipes(int cmdNum, int totalCmds, int fds[][2])
                 close(fds[i][1]);
         }
 }
+
+
+//main function for parsing errors
+int checkErrors(int totalCmds, char* cmd)
+{
+        //cmd starts with a pipe
+        if (cmd[0] == '|')
+        {
+                fprintf(stderr, "Error: missing command\n");
+                return 1;
+        }
+
+        for (int i = 0; i < totalCmds; i++)
+        {
+                if (commandsObj[i].redirectionType > 0 && 
+                        commandsObj[i].cmdOptions[0] == NULL)
+                {
+                        fprintf(stderr, "Error: missing command\n");
+                        return 1;
+                }
+                if (commandsObj[i].cmdOptionsCount > MAX_ARGS)
+                {
+                        fprintf(stderr, "Error: too many process arguments\n");
+                        return 1;
+                }
+                if (commandsObj[i].redirectionType > 0 && 
+                        commandsObj[i].redirectionFileName[0] == '\0')
+                {
+                        fprintf(stderr, "Error: no output file\n");
+                        return 1;
+                }
+                if (commandsObj[i].redirectionType > 0 && 
+                        i != totalCmds-1)
+                {
+                        fprintf(stderr, "Error: mislocated output redirection\n");
+                        return 1;
+                }
+                if (commandsObj[i].cmdOptions[0] == NULL)
+                {
+                        fprintf(stderr, "Error: missing command\n");
+                        return 1;
+                }
+                if (i == totalCmds-1 && commandsObj[i].redirectionType > 0)
+                {
+                        //try opening file
+                        int fd = open(commandsObj[i].redirectionFileName
+                                , O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+                        if (fd == -1)
+                        {
+                                fprintf(stderr, "Error: cannot open output file\n");
+                                return 1;
+                        }
+                        close(fd);
+                }
+        }
+
+        //pipes missing commands between
+        if (strstr(cmd, "||") != NULL || strstr(cmd, "|||") != NULL)
+        { 
+                fprintf(stderr, "Error: missing command\n");
+                return 1;
+        }
+
+        //cmd ends with a pipe
+        char* lastPipe = strrchr(cmd, '|');
+        if (lastPipe != NULL && lastPipe[1] == '\0')
+        {
+                fprintf(stderr, "Error: missing command\n");
+                return 1;
+        }
+        
+        return 0;       //no errors
+
+}
+
 
 int main(void)
 {
@@ -370,23 +393,17 @@ int main(void)
 
                 int numOfCmds = ParseCmdLine(cmdForParsing);
 
-                //pid_t pid; //declare pid
-
-                int maxargs = 0;
-                for (int i = 0; i < numOfCmds; i++)
+                //blank command line, do nothing
+                if(numOfCmds <= 1 && commandsObj[0].redirectionType == 0 &&
+                        strstr(cmd, "|") == NULL && commandsObj[0].cmdOptions[0] == NULL)
                 {
-                        if (commandsObj[i].cmdOptionsCount > MAX_ARGS)
-                               maxargs = 1;
+                        continue;     
                 }
 
-                if (maxargs){
-                        fprintf(stderr, "Error: too many process arguments\n");
+                //checking for parsing errors
+                if (checkErrors(numOfCmds, cmd))
+                {
                         ResetCommandObj();
-                        //free(newcmd);
-                        continue;
-                }
-
-                if(commandsObj[0].cmdName[0] == '\0'){
                         continue;
                 }
                 
@@ -413,7 +430,7 @@ int main(void)
 
                                 execvp(commandsObj[i].cmdName, commandsObj[i].cmdOptions); //use execvp (the -p specifies to use $PATH)
                                 
-                                perror("Error in execv"); //if the exec doesn't work
+                                fprintf(stderr, "Error: command not found\n"); //if the exec doesn't work
                                 exit(1);
                         }
                         //parent
@@ -426,7 +443,7 @@ int main(void)
                         }
                         else
                         {
-                                perror("Forking error");
+                                perror("Forking error\n");
                                 exit(1);    
                         }
                 }
@@ -447,10 +464,10 @@ int main(void)
                 }
 
                 //print completetion message
-                fprintf(stderr, "+ completed '%s'", cmd);
+                fprintf(stderr, "+ completed '%s' ", cmd);
                 for (int i = 0; i < numOfCmds; i++)
                 {
-                        fprintf(stderr, " [%d]", statuses[i]);
+                        fprintf(stderr, "[%d]", statuses[i]);
                 }
                 fprintf(stderr, "\n");
                 
