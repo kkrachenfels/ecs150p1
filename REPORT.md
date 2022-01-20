@@ -55,3 +55,8 @@ we call the `redirectStream()` function to setup redirection based on the argume
 `redirectStream()` sets up the standard input, output, and error based off the redirection field that was set.  
 the actual command is executed in the child process using the system call execvp  
 the parent process waits for each command to finish and checks its exit status.
+
+
+
+
+
