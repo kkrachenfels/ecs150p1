@@ -173,7 +173,7 @@ void cmdSls(void)
                         continue;
                 
                 stat(cwdEntry->d_name, &sb); //get file info
-                printf("%s (%lld bytes)\n", cwdEntry->d_name, sb.st_size);
+                printf("%s (%ld bytes)\n", cwdEntry->d_name, sb.st_size);
         }
         closedir(currentDir);
         fprintf(stderr, "+ completed 'sls' [0]\n");
