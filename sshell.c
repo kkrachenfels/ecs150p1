@@ -215,7 +215,7 @@ void setupPipes(int cmdNum, int totalCmds, int fds[][2])
         }
 
         //close other open/irrelevant file descriptors
-        for (int i = 0; i < cmdNum; i++) {
+        for (int i = 0; i < totalCmds-1; i++) {
                 close(fds[i][0]);
                 close(fds[i][1]);
         }
