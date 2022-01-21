@@ -26,7 +26,7 @@ struct myCmdObj {
 struct myCmdObj commandsObj[MAX_CMDS] = {0};
 
 //Reset and free memory for commandObj struct
-void ResetCommandObj()
+void resetCommandObj()
 {
         for(int i=0; i<MAX_CMDS; ++i) {
                 for(int j=0; j<commandsObj[i].cmdOptionsCount; ++j) {
@@ -46,7 +46,7 @@ void ResetCommandObj()
 }
 
 //Parsing and tokenizing a command and its options
-void ParseCommand(char *cmd, int cmdCounter) 
+void parseCommand(char *cmd, int cmdCounter) 
 {
         int isFirstToken = 1;
         int cmdOptionCounter = 0;
@@ -72,7 +72,7 @@ void ParseCommand(char *cmd, int cmdCounter)
 }
 
 //Parsing for redirection, removes redirection file name from command
-void FindRedirection(char *cmd, int cmdCount, int cmdSize)
+void findRedirection(char *cmd, int cmdCount, int cmdSize)
 {
         char *redirfile; //file to redirect to
         int redirtype = 0; //0 if no redirect, 1 if stdout, 2 if stderr
@@ -103,7 +103,7 @@ void FindRedirection(char *cmd, int cmdCount, int cmdSize)
 }
 
 //Splits command line into multiple commands, separated by pipes
-int FindPipes(char *cmd, char **pipeCmds)
+int findPipes(char *cmd, char **pipeCmds)
 {
         int cmdCounter = 0;
 
@@ -125,21 +125,21 @@ int FindPipes(char *cmd, char **pipeCmds)
 }
 
 //Parses through the entire command line
-int ParseCmdLine(char *cmd)
+int parseCmdLine(char *cmd)
 {
         char *splitCmds[MAX_CMDS];
 
-        int numCmds = FindPipes(cmd, splitCmds);
+        int numCmds = findPipes(cmd, splitCmds);
 
         for (int i = 0; i < numCmds; i++) {
-                FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
-                ParseCommand(splitCmds[i], i);
+                findRedirection(splitCmds[i], i, strlen(splitCmds[i]));
+                parseCommand(splitCmds[i], i);
         }
         return numCmds;
 }
 
 //Built-in cd 
-void CmdInShellCd(char* cmd)
+void cmdCd(char* cmd)
 {
         char *cdToken = strtok(cmd," ");
         cdToken = strtok (NULL, " ");  
@@ -153,7 +153,7 @@ void CmdInShellCd(char* cmd)
 }
 
 //Built-in sls
-void CmdSls(void)
+void cmdSls(void)
 {
         DIR *currentDir;
         struct dirent *cwdEntry; //for a dir entry
@@ -315,10 +315,10 @@ int main(void)
                         fprintf(stderr, "+ completed '%s' [%d]\n", cmd, 0);
                         continue;
                 } else if (cmd[0] == 'c' && cmd[1] == 'd' && cmd[2] == ' ' ) {
-                        CmdInShellCd(cmd);
+                        cmdCd(cmd);
                         continue;
                 } else if (cmd[0] == 's' && cmd[1] == 'l' && cmd[2] == 's') {
-                        CmdSls();
+                        cmdSls();
                         continue;
                 }
 
@@ -326,7 +326,7 @@ int main(void)
                 char cmdForParsing[CMDLINE_MAX] = {0};
                 strcpy(cmdForParsing, cmd);
 
-                int numOfCmds = ParseCmdLine(cmdForParsing);
+                int numOfCmds = parseCmdLine(cmdForParsing);
 
                 //If blank command line, do nothing
                 if(numOfCmds <= 1 && commandsObj[0].redirectionType == 0 &&
@@ -337,7 +337,7 @@ int main(void)
 
                 //Checking for parsing errors
                 if (checkErrors(numOfCmds, cmd)) {
-                        ResetCommandObj();
+                        resetCommandObj();
                         continue;
                 }
                 
@@ -395,7 +395,7 @@ int main(void)
                 fprintf(stderr, "\n");
 
                 //Reset command object struct
-                ResetCommandObj();
+                resetCommandObj();
         }
         return EXIT_SUCCESS;
 }

@@ -2,21 +2,15 @@
 #### By Kay Krachenfels & Aliya Abbas
 
 ### Overview
-The goal of this project was to implement a shell called sshell
-our shell takes commands from the user and executes them based on
-the arguments given, wether they are built-in commands, commands
+The goal of this project was to implement a simpler shell called sshell.
+Our shell takes commands from the user and executes them based on
+the arguments given, determining whether they are built-in commands, commands
 that include redirection, or piped commands. 
-To assure the commands typed by the user weren’t more than 512
-characters, there were no more than 16 arguments given, and the
-length of a single token wasn’t more than 32 characters, we
-declared  global variables `CMDLINE_MAX`, `MAX_ARGS`, `MAX_CMDS`,
-`MAX_CMDLENGTH` and set them to their respective lenghts.
+To set basic program constraints, we declared macros `CMDLINE_MAX`, `MAX_ARGS`,
+`MAX_CMDS`, `MAX_CMDLENGTH` and set them to their respective lenghts.
 
 ### Builtin Commands 
-We started by getting the command from the user, then worked on
-implementing built-in commands such as exit, pwd, and cd. Each of 
-these functions were implemented by calling system calls, the 
-corresponding system call for each function are as follows:  
+After getting the command from the user, built-in commands `exit`, `pwd`, `cd`, and `sls` could be implemented with the corresponding system calls:
 
 ```
 pwd -> getcwd()
@@ -24,79 +18,50 @@ cd -> chdir()
 sls -> opendir(), readdir()
 exit -> exit()
 ```
+For `sls`, we used the direct and stat structs so that information returned from the syscalls could be temporarily stored and then printed.
+
+Error checking for `cd` and `sls` was also implemented, using return values from the syscalls to ensure that a directory could be accessed and/or read.
 
 
-### Command Parsing
-Once we detected that it was a built-in command we parsed the 
-command line for regular commands and tokenized them (split into 
-tokens). Inside `ParseCmdLine()`  we find what kind of command it 
-is and we check for things like redirection, pipe, and errors.
+### Regular Command Parsing
+For commands that would not be built-in, we parsed and tokenized the command 
+line. Most of the command line parsing was done with string library functions, particularly `strtok()`. 
 
-For example in `ParseCmdLine()` we parse and check for redirection 
-then set flags accordingly. We also do error checking here, using 
-the `FindPipeError` this function is used to find command line 
-errors for piped commands. we search for if the command has > 
-symbol and | symbol in the same string then we give an error 
-message. We check to see if there is anything on the right side of 
-the pipe and if it is NULL then it means theres a missing command. 
-We also do other error checking to see if the first charecter of 
-the string has a pipe symbol then it means theres no command on 
-the left side so we issue an error message.
+Because of this, we pass a copy of the original command string to our parser functions; we learned the hard way that `strtok` could sometimes unhelpfully modify original command, unlike most other string library functions, and wanted to parse a copy of the command that we didn't mind being modified while keeping the original command complete for eventual completion status messages.
 
+For the parsing itself, we have a main parser function, `parseCmdLine()`, where we then call other, sub-parser functions, to simplify the parsing process. Inside `parseCmdLine()`  we methodically parsed the command line in steps, first by searching for any pipe characters ('|') and splitting the line into multiple commands with the function `findPipes()`. 
+Then, with `findRedirection()`, we parsed each command for any redirection as indicated by the '>' or '>&' symbols. We extracted the redirection type in addition to the redirection file and stored these the command object.
+Finally, we parsed the remaining part of the command (without any redirection file name) with `parseCommand()`. This function copies remaining information for the command to its respective command object, dynamically allocating space for the command arguments as necessary.
 
-For parsing the chain of pipe commands we first split/tokenize the
-command line based on the pipe symbol and keep tokenizing based on 
-the pipe symbol and keep storing each chain of command.  
-The last thing we check for in pipe command is we search for the
-right side of the command and if we cant find the right sife then 
-we tokenize again.  
+Following parsing, we checked for errors in the `checkErrors()` function. With all the information stored in the command objects, most error checking could be done by inspecting each command object and checking that it contained all the information it needed to execute a command. For example, if the command object indicated redirection type was 1 (redirect std out) but its filename was empty, we knew to throw a `no output file` error. Or if the first element of the command arguments array (`cmdOptions[0], AKA the name of the command itself`) was empty, we could then throw a `missing command` error.
 
-When we initially parse a command line from the user we also use 
-dynamically alloacted string buffers inside command object 
-structures based on the number of commands and options
-
-After the completion of one command line (success or failure)
-we call the `ResetCommandObj()` function, this function returns 
-all the memory buffers.  
-We clear all the memory buffers that were used and reset all the 
-caount to 0 again to make it ready to parse the next command line 
-again.  
+Eventually, after the completion of one command line (success or failure)
+we would call the `ResetCommandObj()` function, this function freess 
+all the memory buffers. 
+We would clear all the memory buffers that were used and reset all the 
+counts to 0 again to make it ready to parse the next command line.  
 
 
 
 ### Command Structure
-Once we know that there are no errors in redirection and piping, 
-we split the command. Each command is stored in `myCmdObj` here 
-the command name and command options are stored. `cmdName` tells 
-us the command name, for example if it is ls, `cmdOptions` tells 
-us the command options for example if its ls -l
-we also find things like if theres redirection, the file name for 
-redirection, 
-and piping.
+As mentioned in the parsing section, the command object `myCmdObj` contains all the information necessary to execute a command. 
+The command name and command options are stored; `cmdName` is staticalloy allocated based on program constraints, while we left the array of `cmdOptions`, for command options/arguments, to be dynamically allocated. This is because commands could vary wildly in the number of arguments passed to the command, and staticlly allocating space for the maximum sixteen possible arguments would likely be a waste of memory most times. 
+Other informtation the command object contains are variables checking if there is redirection, the file name for redirection, and certain piping conditions.
 
-We also have an array of `myCmdObj` called `struct myCmdObj 
-commandsObj[MAX_CMDS] = {0}` that stores all the parsed commands.  
-for example if the user types ls -a | wc  
-commandsObj[0] = ls -l  
-commandsObj[1] = wc  
+To track all the commands in a command line, we have an array of `myCmdObj` called `struct myCmdObj commandsObj[MAX_CMDS] = {0}` that stores all the parsed commands.
+
+For example if the user types `ls -a | wc`  
+commandsObj[0] would store `ls -l` and commandsObj[1] would store `wc`. 
 
 
 
+### Executing Shell Commands (fork(), exec(), and pipe())
 
-### Executing Shell Commands (fork exec)
+Based on the number of commands/pipes we got on one command line, we create the pipes and `fork()` off the desired number of children processess.
+The number of pipes would always be the number of commands, minus 1.
+To prepare for this we created two arrays, one for tracking open file destriptors to pipes (`int fds[numOfCmds-1][2]`), and one for tracking all the children's pids (`pid_t pids[numOfCmds]`). The idea to then use a loop for forking multiple children and tracking their forked pids in an array was taken from the top reply to [this post](https://stackoverflow.com/questions/1381089/multiple-fork-concurrency).
 
-based on the number of commands we have we create equivelant child 
-processess and we have to create the same number of pipes. 
-for each piped command we fork that many child proccess and save 
-their process id's.
-we create and setup pipes in the function `setupPipes()` funtion
-we also check if the command strucure has a redirection type 
-we call the `redirectStream()` function to setup redirection based 
-on the arguments that were passed.
+Additionally, we ran a couple of our own functions within that loop. The `setupPipes()` function was used to close and copy file descriptors for each child's pipes as necessary. The logic we used here was that every child/command except the last child/command in a pipeline would need to redirect its standard output to a pipe (`if (cmdNum < totalCmds - 1)`), and every child/command except the first child/command would need to redirect its standard input to be from a pipe (`if (cmdNum > 0)`). Also, since our method of looping and forking ended up opening each pipeline in each child, we had to then close all irrelevant file descriptors to pipes to prevent hanging. We also wrote the `redirectStream()` function to be run after pipes were set up to further redirect any output on the final command of a pipeline - calling `dup2()` on only STDOUT_FILENO or also on STDERR_FILENO if error was being redirected as well. Finally, we would have everything set up to execute each command in its respective child with the `execvp()` syscall.
 
-`redirectStream()` sets up the standard input, output, and error 
-based off the redirection field that was set.  
-the actual command is executed in the child process using the 
-system call execvp  
-the parent process waits for each command to finish and checks its 
-exit status.
+Meanwhile, the parent process waits for each command to finish and checks its 
+exit status. We also had to close all the open file descriptors in the parent process to prevent hanging, before calling `waitpid()` on any children. Since we had stored all the children pids in an array, we simply looped through this array and waited on all the children, collecting their exit statuses in another array and then looping through that to print the completion statement. Then the command object could be reset and we'd take in a new command and go for another loop again!
