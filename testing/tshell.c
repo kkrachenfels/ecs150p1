@@ -1,80 +1,103 @@
-#include <dirent.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 #define CMDLINE_MAX 512
 #define MAX_ARGS 16
-#define MAX_CMDLENGTH 32
 #define MAX_CMDS 4
+#define MAX_CMDLENGTH 32
 
-//Struct to represent a command
+// struct to represent a command.
 struct myCmdObj {
-    char cmdName[MAX_CMDLENGTH];
-    char *cmdOptions[MAX_ARGS+1]; // cmd options i.e.  ls -l
+    char cmdName[MAX_CMDLENGTH];      // cmd name i.e. ls
+    char *cmdOptions[MAX_ARGS+1];  // cmd options i.e.  ls -l
     int cmdOptionsCount;
     int redirectionType; //0 = no redir; 1 = std out; 2 = std out & err
-    char redirectionFileName[MAX_CMDLENGTH];  
-    int pipeStdErr; //if piping std error in addition to std out
+    char redirectionFileName[MAX_CMDLENGTH];  // redirection file name.
+    int pipeStdErr; //if piping std error in addition to std out           
 };
 
-//Hold info for each command
+// maximum of 4 commands.
 struct myCmdObj commandsObj[MAX_CMDS] = {0};
 
-//Reset and free memory for commandObj struct
+
+// Reset and free memory for commandObj struct.
 void ResetCommandObj()
 {
         for(int i=0; i<MAX_CMDS; ++i) {
-                for(int j=0; j<commandsObj[i].cmdOptionsCount; ++j) {
-                        if(commandsObj[i].cmdOptions[j] != NULL)
+                for(int j=0; j<commandsObj[i].cmdOptionsCount; ++j) 
+                {
+                        if(commandsObj[i].cmdOptions[j] != NULL){
                                 free(commandsObj[i].cmdOptions[j]);
+                        }
                         commandsObj[i].cmdOptions[j] = NULL;
                 }
                 //terminate cmdOptions with NULL ptr for execvp()
                 commandsObj[i].cmdOptions[MAX_ARGS] = NULL;
 
-                memset(commandsObj[i].cmdName, '\0', MAX_CMDLENGTH);
-                memset(commandsObj[i].redirectionFileName, '\0', MAX_CMDLENGTH);
                 commandsObj[i].cmdOptionsCount = 0;
+                memset(commandsObj[i].cmdName, '\0', MAX_CMDLENGTH);    
+
                 commandsObj[i].redirectionType = 0;
+                memset(commandsObj[i].redirectionFileName, '\0', MAX_CMDLENGTH);
+
                 commandsObj[i].pipeStdErr = 0;
         }
 }
 
-//Parsing for redirection, removes redirection file name from command
+
+
+//Parsing for redirection, removes redirection file name from command */
 void FindRedirection(char *cmd, int cmdCount, int cmdSize)
 {
-        char *redirfile; //file to redirect to
+        char *redirfile;        //file to redirect to
         int redirtype = 0; //0 if no redirect, 1 if stdout, 2 if stderr
 
-        char *isRedirect = strstr(cmd, ">"); //extracts part begining with >
-        int toredirect = strcspn(cmd, ">"); //finds location of >
+        char *isRedirect = strstr(cmd, ">");    //extracts part begining with >
+        int toredirect = strcspn(cmd, ">");     //finds location of >
 
-        if (isRedirect) {
-                if (isRedirect[1] == '&') {
+        //if > is found (not null)
+        if (isRedirect) 
+        {
+                //if it is >&
+                if (isRedirect[1] == '&') 
+                {
                         redirtype = 2; //redirect std out and err
                         redirfile = strtok(isRedirect, " >&"); //extact filename
-                } else {
+                }
+                //if it is only >
+                else
+                {
                         redirtype = 1; //redirect std out only
                         redirfile = strtok(isRedirect, " >"); //extract filename
                 }
 
                 if (redirfile != NULL)
-                    strcpy(commandsObj[cmdCount].redirectionFileName,redirfile);
+                {
+                    strcpy(commandsObj[cmdCount].redirectionFileName,redirfile);    
+                }
                 commandsObj[cmdCount].redirectionType = redirtype;
                 
-                //new cmd is same as original cmd without redirection file
+                //new cmd is same as original cmd without the redirection and file
                 char* tmpCmdHolder = calloc(cmdSize, sizeof(char));
                 strncpy(tmpCmdHolder, cmd, toredirect);
                 memset(cmd, '\0', cmdSize);
                 strcpy(cmd, tmpCmdHolder);
                 free(tmpCmdHolder);
+
+                //strncpy(newcmd, cmd, toredirect);  //copy chars up to the > 
         }
+        //else strcpy(newcmd, cmd); //cmd is unmodified
+
+        //return newcmd;
 }
+
+
 
 //Parsing and tokenizing a command and its options
 void ParseCommand(char *cmd, int cmdCounter) 
@@ -83,24 +106,29 @@ void ParseCommand(char *cmd, int cmdCounter)
         int cmdOptionCounter = 0;
         char *token = strtok (cmd," ");
 
-        while (token != NULL && cmdOptionCounter <= MAX_ARGS) {
+        while (token != NULL && cmdOptionCounter <= MAX_ARGS)
+        {
+                //printf ("PRINTING current token: %s\n",token);
                 if(isFirstToken){
+                        // first token is the command name.
                         strcpy(commandsObj[cmdCounter].cmdName,token);
                         isFirstToken = 0;
-                }
-                commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = 
-                        (char *) malloc(MAX_CMDLENGTH * sizeof(char));
-                strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
+                } 
                 
+                commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = (char *) malloc(MAX_CMDLENGTH * sizeof(char));
+                strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
                 cmdOptionCounter++;
+
                 token = strtok(NULL, " ");
         }
+        //will check this for error code later
         if (cmdOptionCounter > MAX_ARGS)
                 commandsObj[cmdCounter].cmdOptionsCount = MAX_ARGS+1;
 
-        //Save the number of options for this command
+        // save the number of options for this command
         commandsObj[cmdCounter].cmdOptionsCount = cmdOptionCounter;
 }
+
 
 //Splits command line into multiple commands, separated by pipes
 int FindPipes(char *cmd, char **pipeCmds)
@@ -109,20 +137,22 @@ int FindPipes(char *cmd, char **pipeCmds)
 
         char *pipeToken = strtok (cmd,"|");
 
-        while (pipeToken != NULL) {
-                if (pipeToken[0] == '&') {
+        while (pipeToken != NULL)
+        {
+                if (pipeToken[0] == '&')
+                {
                         pipeToken++;
                         commandsObj[cmdCounter-1].pipeStdErr = 2;
                 }
-                pipeCmds[cmdCounter] = 
-                        (char *) malloc(strlen(pipeToken) * sizeof(char));
+                pipeCmds[cmdCounter] = (char *) malloc(strlen(pipeToken) * sizeof(char));
                 strcpy(pipeCmds[cmdCounter], pipeToken);
-
+                //printf("Current pipe token: %s\n", pipeCmds[cmdCounter]);
                 cmdCounter++;
                 pipeToken = strtok(NULL, "|");
         }
         return cmdCounter;
 }
+
 
 //Parses through the entire command line
 int ParseCmdLine(char *cmd)
@@ -131,63 +161,81 @@ int ParseCmdLine(char *cmd)
 
         int numCmds = FindPipes(cmd, splitCmds);
 
-        for (int i = 0; i < numCmds; i++) {
+        for (int i = 0; i < numCmds; i++)
+        {
                 FindRedirection(splitCmds[i], i, strlen(splitCmds[i]));
                 ParseCommand(splitCmds[i], i);
         }
+        //for debugging, to make sure everything was parsed correctly
+        /*for (int i = 0; i < numCmds; i++)
+        {
+                printf("Command [%d]: %s", i, commandsObj[i].cmdName);
+                for (int j = 1; j < commandsObj[i].cmdOptionsCount; j++)
+                {
+                        printf(" %s", commandsObj[i].cmdOptions[j]);
+                }
+                printf("\n Redirection type: %d and filename: %s\n",
+                        commandsObj[i].redirectionType, 
+                        commandsObj[i].redirectionFileName);
+        }*/
+
         return numCmds;
 }
 
-//Built-in cd 
+
+// Phase 3, Implement Built-in commands cd in a shell. 
 void CmdInShellCd(char* cmd)
 {
         char *cdToken = strtok(cmd," ");
         cdToken = strtok (NULL, " ");  
 
         int returnValue = chdir(cdToken);
-
         if (returnValue == -1)
                 fprintf(stderr, "Error: cannot cd into directory\n");
-        fprintf(stderr, "+ completed '%s %s' [%d]\n", cmd, cdToken,
-                (returnValue == -1) ? 1 : 0);
+        fprintf(stderr, "+ completed '%s %s' [%d]\n", cmd, cdToken, (returnValue == -1) ? 1 : 0);
 }
 
-//Built-in sls
+//Phase 6, built-in sls
 void CmdSls(void)
 {
-        DIR *currentDir;
-        struct dirent *cwdEntry; //for a dir entry
-        currentDir = opendir("."); //open cwd
+        DIR *currentDir;                 
+        struct dirent *cwdEntry;        //for a dir entry
+        currentDir = opendir(".");      //open cwd
 
-        if (currentDir == NULL) {
+        if (currentDir == NULL)
+        {
                 fprintf(stderr, "Error: cannot open directory\n");
                 fprintf(stderr, "+ completed 'sls' [1]\n");
                 exit(1);
         }
-        struct stat sb; //for file info
+
+        struct stat sb;       //for file info
         
         //cycle through cwd entries
-        while ((cwdEntry = readdir(currentDir)) != NULL) {
+        while ((cwdEntry = readdir(currentDir)) != NULL)
+        {
                 //ignore hidden directories
                 if ((cwdEntry->d_name)[0] == '.')
                         continue;
                 
-                stat(cwdEntry->d_name, &sb); //get file info
-                printf("%s (%lld bytes)\n", cwdEntry->d_name, sb.st_size);
+                stat(cwdEntry->d_name, &sb);  //get file info
+                printf("%s (%lld bytes)\n", cwdEntry->d_name, sb.st_size); //print file info
         }
         closedir(currentDir);
         fprintf(stderr, "+ completed 'sls' [0]\n");
 }
 
-//Redirect output as needed
+
 void redirectStream(int redirType, int cmdNum)
 {
-        if (redirType != 0) {
+        if (redirType != 0)
+        {
+                //open file to redirect to
                 int fd = open(commandsObj[cmdNum].redirectionFileName
                         , O_WRONLY | O_CREAT | O_TRUNC, 0644);
                  
                 dup2(fd, STDOUT_FILENO); //redirect std out 
-
+                                        
                 if (redirType == 2)
                         dup2(fd, STDERR_FILENO); //redirect std err
                 
@@ -195,66 +243,89 @@ void redirectStream(int redirType, int cmdNum)
         }
 }
 
-//Set up pipes between commands
 void setupPipes(int cmdNum, int totalCmds, int fds[][2])
 {
-        //child needs to write stdout/std err to a pipe 
-        if (cmdNum < totalCmds - 1) {
-                close(fds[cmdNum][0]);
-                dup2(fds[cmdNum][1], STDOUT_FILENO);
+        /*printf("Child here. Pid = %d, parent = %d. i = %d\n", 
+        getpid(), getppid(), cmdNum);   //debugging*/
+                        
+        //child needs to write stdout to a pipe 
+        if (cmdNum < totalCmds - 1)
+        {
+                close(fds[cmdNum][0]); //don't need read access to pipe
+                dup2(fds[cmdNum][1], STDOUT_FILENO); //replace stdout with pipe
                 if (commandsObj[cmdNum].pipeStdErr == 2)
-                        dup2(fds[cmdNum][1], STDERR_FILENO);
-                close(fds[cmdNum][1]);
+                {
+                        dup2(fds[cmdNum][1], STDERR_FILENO); //replace stderr with pipe
+                }
+                close(fds[cmdNum][1]);       //close now unused fd
         }
 
         //child needs to read stdin from a pipe
-        if (cmdNum > 0) {
-                close(fds[cmdNum-1][1]);
-                dup2(fds[cmdNum-1][0], STDIN_FILENO);
-                close(fds[cmdNum-1][0]);
+        if (cmdNum > 0)
+        {
+                close(fds[cmdNum-1][1]);     //don't need write access to pipe
+                dup2(fds[cmdNum-1][0], STDIN_FILENO); //replace stdin with pipe
+                close(fds[cmdNum-1][0]); //close now unused fd
         }
 
-        //close other open/irrelevant file descriptors
-        for (int i = 0; i < cmdNum; i++) {
+        /*close all other pipelines since each child has fds to
+        pipelines it doesn't need*/
+        for (int i = 0; i < cmdNum; i++)
+        {
                 close(fds[i][0]);
                 close(fds[i][1]);
         }
 }
 
-//Main function for parsing errors
+
+//main function for parsing errors
 int checkErrors(int totalCmds, char* cmd)
 {
         //cmd starts with a pipe
-        if (cmd[0] == '|') {
+        if (cmd[0] == '|')
+        {
                 fprintf(stderr, "Error: missing command\n");
                 return 1;
         }
 
-        for (int i = 0; i < totalCmds; i++) {
+        for (int i = 0; i < totalCmds; i++)
+        {
                 if (commandsObj[i].redirectionType > 0 && 
-                        commandsObj[i].cmdOptions[0] == NULL) {
+                        commandsObj[i].cmdOptions[0] == NULL)
+                {
                         fprintf(stderr, "Error: missing command\n");
                         return 1;
-                } else if (commandsObj[i].cmdOptionsCount > MAX_ARGS) {
+                }
+                if (commandsObj[i].cmdOptionsCount > MAX_ARGS)
+                {
                         fprintf(stderr, "Error: too many process arguments\n");
                         return 1;
-                } else if (commandsObj[i].redirectionType > 0 &&
-                        commandsObj[i].redirectionFileName[0] == '\0') {
+                }
+                if (commandsObj[i].redirectionType > 0 && 
+                        commandsObj[i].redirectionFileName[0] == '\0')
+                {
                         fprintf(stderr, "Error: no output file\n");
                         return 1;
-                } else if (commandsObj[i].redirectionType > 0 && 
-                        i != totalCmds-1) {
+                }
+                if (commandsObj[i].redirectionType > 0 && 
+                        i != totalCmds-1)
+                {
                         fprintf(stderr, "Error: mislocated output redirection\n");
                         return 1;
-                } else if (commandsObj[i].cmdOptions[0] == NULL) {
+                }
+                if (commandsObj[i].cmdOptions[0] == NULL)
+                {
                         fprintf(stderr, "Error: missing command\n");
                         return 1;
-                } else if (i == totalCmds-1 && commandsObj[i].redirectionType > 0) {
+                }
+                if (i == totalCmds-1 && commandsObj[i].redirectionType > 0)
+                {
                         //try opening file
                         int fd = open(commandsObj[i].redirectionFileName
                                 , O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
-                        if (fd == -1) {
+                        if (fd == -1)
+                        {
                                 fprintf(stderr, "Error: cannot open output file\n");
                                 return 1;
                         }
@@ -262,20 +333,23 @@ int checkErrors(int totalCmds, char* cmd)
                 }
         }
 
-        //if pipes are missing commands between them
-        if (strstr(cmd, "||") != NULL || strstr(cmd, "|||") != NULL) {
+        //pipes missing commands between
+        if (strstr(cmd, "||") != NULL || strstr(cmd, "|||") != NULL)
+        { 
                 fprintf(stderr, "Error: missing command\n");
                 return 1;
         }
 
-        //if command ends with a pipe
+        //cmd ends with a pipe
         char* lastPipe = strrchr(cmd, '|');
-        if (lastPipe != NULL && lastPipe[1] == '\0') {
+        if (lastPipe != NULL && lastPipe[1] == '\0')
+        {
                 fprintf(stderr, "Error: missing command\n");
                 return 1;
         }
+        
+        return 0;       //no errors
 
-        return 0; //no errors
 }
 
 
@@ -304,7 +378,7 @@ int main(void)
                 if (nl)
                         *nl = '\0';
 
-                // Builtin commands
+                /* Builtin command */
                 if (!strcmp(cmd, "exit")) {
                         fprintf(stderr, "Bye...\n");
                         fprintf(stderr, "+ completed '%s' [%d]\n", cmd, 0);
@@ -322,80 +396,95 @@ int main(void)
                         continue;
                 }
 
-                //Leave original cmd unmodified during parsing
+                //so original cmd line remains unmodified for status printing
                 char cmdForParsing[CMDLINE_MAX] = {0};
                 strcpy(cmdForParsing, cmd);
 
                 int numOfCmds = ParseCmdLine(cmdForParsing);
 
-                //If blank command line, do nothing
+                //blank command line, do nothing
                 if(numOfCmds <= 1 && commandsObj[0].redirectionType == 0 &&
-                        strstr(cmd, "|") == NULL && 
-                        commandsObj[0].cmdOptions[0] == NULL) {
-                        continue;
+                        strstr(cmd, "|") == NULL && commandsObj[0].cmdOptions[0] == NULL)
+                {
+                        continue;     
                 }
 
-                //Checking for parsing errors
-                if (checkErrors(numOfCmds, cmd)) {
+                //checking for parsing errors
+                if (checkErrors(numOfCmds, cmd))
+                {
                         ResetCommandObj();
                         continue;
                 }
                 
-                //Start forking
+                /*STARTING FORKING....*/
                 int fds[numOfCmds-1][2]; //n commands = n-1 pipes
                 pid_t pids[numOfCmds]; //n pids
 
-                //Create pipes
-                for (int i = 0; i < numOfCmds; i++) {
+                //create pipes
+                for (int i = 0; i < numOfCmds; i++)
+                {
                         pipe(fds[i]);
                 }
 
-                for (int i = 0; i < numOfCmds; i++) {
-                        //For each piped cmd, fork and then save child pid
+                for (int i = 0; i < numOfCmds; i++)
+                {
+                        //for each piped cmd, fork and then save child pid
                         pids[i] = fork();
                         
-                        if (pids[i] == 0) {
-                                //Child
+                        //child
+                        if (pids[i] == 0)
+                        {
                                 setupPipes(i, numOfCmds, fds);
                                 redirectStream(commandsObj[i].redirectionType, i);
 
-                                execvp(commandsObj[i].cmdName, 
-                                        commandsObj[i].cmdOptions);
+                                execvp(commandsObj[i].cmdName, commandsObj[i].cmdOptions); //use execvp (the -p specifies to use $PATH)
                                 
-                                fprintf(stderr, "Error: command not found\n");
+                                fprintf(stderr, "Error: command not found\n"); //if the exec doesn't work
                                 exit(1);
-                        } else if (pids[i] > 0) {
-                                //Parent
+                        }
+                        //parent
+                        else if (pids[i] > 0)
+                        {
                                 continue;
-                        } else {
+                                //debugging
+                                /*printf("Parent here. Pid: %d. Just forked off child: %d\n",
+                                        getpid(), pids[i]);*/ 
+                        }
+                        else
+                        {
                                 perror("Forking error\n");
-                                exit(1);
+                                exit(1);    
                         }
                 }
                 
-                //Close all file descriptors in parent
-                for (int i = 0; i < numOfCmds-1; i++) {
+                for (int i = 0; i < numOfCmds-1; i++)
+                {
                         close(fds[i][0]);
                         close(fds[i][1]);
                 }
 
-                //Wait for each child to finish
+                //wait for each child to finish
                 int status;
                 int statuses[numOfCmds];
-                for (int i = 0; i < numOfCmds; i++) {
+                for (int i = 0; i < numOfCmds; i++)
+                {
                         waitpid(pids[i], &status, 0);
                         statuses[i] = WEXITSTATUS(status);
                 }
 
-                //Print completetion message
+                //print completetion message
                 fprintf(stderr, "+ completed '%s' ", cmd);
-                for (int i = 0; i < numOfCmds; i++) {
+                for (int i = 0; i < numOfCmds; i++)
+                {
                         fprintf(stderr, "[%d]", statuses[i]);
                 }
                 fprintf(stderr, "\n");
+                
 
-                //Reset command object struct
+                // Reset command object struct.
                 ResetCommandObj();
+
         }
+
         return EXIT_SUCCESS;
 }
