@@ -15,7 +15,7 @@
 //Struct to represent a command
 struct myCmdObj {
     char cmdName[MAX_CMDLENGTH];
-    char *cmdOptions[MAX_ARGS+1]; // cmd options i.e.  ls -l
+    char *cmdOptions[MAX_ARGS+1]; //args for each cmd
     int cmdOptionsCount;
     int redirectionType; //0 = no redir; 1 = std out; 2 = std out & err
     char redirectionFileName[MAX_CMDLENGTH];  
@@ -43,6 +43,32 @@ void ResetCommandObj()
                 commandsObj[i].redirectionType = 0;
                 commandsObj[i].pipeStdErr = 0;
         }
+}
+
+//Parsing and tokenizing a command and its options
+void ParseCommand(char *cmd, int cmdCounter) 
+{
+        int isFirstToken = 1;
+        int cmdOptionCounter = 0;
+        char *token = strtok (cmd," ");
+
+        while (token != NULL && cmdOptionCounter <= MAX_ARGS) {
+                if(isFirstToken){
+                        strcpy(commandsObj[cmdCounter].cmdName,token);
+                        isFirstToken = 0;
+                }
+                commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = 
+                        (char *) malloc(MAX_CMDLENGTH * sizeof(char));
+                strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
+                
+                cmdOptionCounter++;
+                token = strtok(NULL, " ");
+        }
+        if (cmdOptionCounter > MAX_ARGS)
+                commandsObj[cmdCounter].cmdOptionsCount = MAX_ARGS+1;
+
+        //Save the number of options for this command
+        commandsObj[cmdCounter].cmdOptionsCount = cmdOptionCounter;
 }
 
 //Parsing for redirection, removes redirection file name from command
@@ -74,32 +100,6 @@ void FindRedirection(char *cmd, int cmdCount, int cmdSize)
                 strcpy(cmd, tmpCmdHolder);
                 free(tmpCmdHolder);
         }
-}
-
-//Parsing and tokenizing a command and its options
-void ParseCommand(char *cmd, int cmdCounter) 
-{
-        int isFirstToken = 1;
-        int cmdOptionCounter = 0;
-        char *token = strtok (cmd," ");
-
-        while (token != NULL && cmdOptionCounter <= MAX_ARGS) {
-                if(isFirstToken){
-                        strcpy(commandsObj[cmdCounter].cmdName,token);
-                        isFirstToken = 0;
-                }
-                commandsObj[cmdCounter].cmdOptions[cmdOptionCounter] = 
-                        (char *) malloc(MAX_CMDLENGTH * sizeof(char));
-                strcpy(commandsObj[cmdCounter].cmdOptions[cmdOptionCounter],token);
-                
-                cmdOptionCounter++;
-                token = strtok(NULL, " ");
-        }
-        if (cmdOptionCounter > MAX_ARGS)
-                commandsObj[cmdCounter].cmdOptionsCount = MAX_ARGS+1;
-
-        //Save the number of options for this command
-        commandsObj[cmdCounter].cmdOptionsCount = cmdOptionCounter;
 }
 
 //Splits command line into multiple commands, separated by pipes
